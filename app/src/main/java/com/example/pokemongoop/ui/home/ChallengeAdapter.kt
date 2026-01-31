@@ -32,7 +32,13 @@ class ChallengeAdapter : ListAdapter<DailyChallenge, ChallengeAdapter.ChallengeV
 
         fun bind(challenge: DailyChallenge) {
             binding.challengeTitleText.text = challenge.title
-            binding.challengeDescText.text = challenge.description
+            // Show progress in description
+            val progressText = if (challenge.isCompleted) {
+                "${challenge.description} (Completed!)"
+            } else {
+                "${challenge.description} (${challenge.currentProgress}/${challenge.targetCount})"
+            }
+            binding.challengeDescText.text = progressText
             binding.challengeRewardText.text = "+${challenge.rewardExperience} XP"
 
             // Set progress

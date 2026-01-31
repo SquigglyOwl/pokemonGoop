@@ -55,26 +55,33 @@ class GameRepository(private val database: AppDatabase) {
         val evolution = database.creatureDao().getEvolution(creature.id)
             ?: return null
 
-        if (playerCreature.experience >= creature.experienceToEvolve) {
-            // Delete old creature and create evolved one
-            database.playerCreatureDao().delete(playerCreature)
+        // Need 3 of the same creature to evolve (merge style like Dragon City)
+        val sameCreatures = database.playerCreatureDao().getPlayerCreaturesByCreatureId(creature.id)
+        if (sameCreatures.size >= 3) {
+            // Delete 3 creatures (including this one)
+            val toDelete = sameCreatures.take(3)
+            toDelete.forEach { database.playerCreatureDao().delete(it) }
+
+            // Create evolved creature
             val evolvedCreature = PlayerCreature(
                 creatureId = evolution.id,
                 nickname = playerCreature.nickname,
-                experience = playerCreature.experience - creature.experienceToEvolve,
-                caughtDate = playerCreature.caughtDate,
                 isFavorite = playerCreature.isFavorite,
                 caughtLatitude = playerCreature.caughtLatitude,
                 caughtLongitude = playerCreature.caughtLongitude
             )
-            database.playerCreatureDao().insert(evolvedCreature)
+            val newId = database.playerCreatureDao().insert(evolvedCreature)
             database.playerStatsDao().incrementTotalEvolved()
             database.playerStatsDao().addExperience(50)
             updateEvolutionAchievements()
             updateEvolveChallengeProgress()
-            return evolvedCreature
+            return evolvedCreature.copy(id = newId)
         }
         return null
+    }
+
+    suspend fun getEvolveCount(creatureId: Long): Int {
+        return database.playerCreatureDao().getCountByCreatureId(creatureId)
     }
 
     suspend fun fuseCreatures(

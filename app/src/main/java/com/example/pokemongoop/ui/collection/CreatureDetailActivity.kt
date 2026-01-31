@@ -122,17 +122,22 @@ class CreatureDetailActivity : AppCompatActivity() {
         binding.defenseBar.progress = creature.baseDefense
         binding.defenseText.text = creature.baseDefense.toString()
 
-        // Set experience
-        val expToEvolve = creature.experienceToEvolve
-        if (expToEvolve > 0) {
-            val progress = (playerCreature.experience * 100) / expToEvolve
-            binding.expBar.progress = progress.coerceIn(0, 100)
-            binding.expText.text = "${playerCreature.experience} / $expToEvolve XP to evolve"
-            binding.evolveButton.isEnabled = playerCreature.experience >= expToEvolve
-        } else {
-            binding.expBar.progress = 100
-            binding.expText.text = "Max Evolution"
-            binding.evolveButton.isEnabled = false
+        // Set evolution progress (need 3 to evolve)
+        lifecycleScope.launch {
+            val count = repository.getEvolveCount(creature.id)
+            val canEvolve = creature.evolvesToId != null
+            withContext(Dispatchers.Main) {
+                if (canEvolve) {
+                    val progress = (count * 100) / 3
+                    binding.expBar.progress = progress.coerceIn(0, 100)
+                    binding.expText.text = "You have $count/3 - Merge 3 to evolve!"
+                    binding.evolveButton.isEnabled = count >= 3
+                } else {
+                    binding.expBar.progress = 100
+                    binding.expText.text = "Max Evolution"
+                    binding.evolveButton.isEnabled = false
+                }
+            }
         }
 
         // Set description
