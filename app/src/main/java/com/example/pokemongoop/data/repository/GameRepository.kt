@@ -39,6 +39,11 @@ class GameRepository(private val database: AppDatabase) {
         database.playerStatsDao().incrementTotalCaught()
         database.playerStatsDao().addExperience(25)
         updateCatchAchievements()
+
+        // Update daily challenge progress
+        val creature = database.creatureDao().getCreatureById(creatureId)
+        creature?.let { updateCatchChallengeProgress(it.type) }
+
         return id
     }
 
@@ -66,6 +71,7 @@ class GameRepository(private val database: AppDatabase) {
             database.playerStatsDao().incrementTotalEvolved()
             database.playerStatsDao().addExperience(50)
             updateEvolutionAchievements()
+            updateEvolveChallengeProgress()
             return evolvedCreature
         }
         return null
@@ -203,6 +209,10 @@ class GameRepository(private val database: AppDatabase) {
     suspend fun generateDailyChallenges() {
         database.dailyChallengeDao().deleteExpiredChallenges()
 
+        // Only generate if no active challenges exist
+        val activeCount = database.dailyChallengeDao().getActiveChallengeCount()
+        if (activeCount > 0) return
+
         val calendar = Calendar.getInstance()
         calendar.add(Calendar.DAY_OF_YEAR, 1)
         calendar.set(Calendar.HOUR_OF_DAY, 0)
@@ -240,11 +250,43 @@ class GameRepository(private val database: AppDatabase) {
         database.dailyChallengeDao().insertAll(challenges)
     }
 
-    suspend fun updateChallengeProgress(challengeType: ChallengeType, goopType: GoopType? = null) {
-        val challenges = database.dailyChallengeDao()
-            .getActiveChallenges()
+    private suspend fun updateCatchChallengeProgress(caughtType: GoopType) {
+        // Get all active incomplete challenges synchronously
+        val activeChallenges = database.dailyChallengeDao().getActiveIncompleteChallengesSync()
 
-        // This is simplified - in a real app you'd collect the flow
+        for (challenge in activeChallenges) {
+            val shouldUpdate = when (challenge.challengeType) {
+                ChallengeType.CATCH_ANY -> true
+                ChallengeType.CATCH_TYPE -> challenge.targetType == caughtType
+                else -> false
+            }
+
+            if (shouldUpdate) {
+                val newProgress = challenge.currentProgress + 1
+                database.dailyChallengeDao().updateProgress(challenge.id, newProgress)
+
+                if (newProgress >= challenge.targetCount) {
+                    database.dailyChallengeDao().markCompleted(challenge.id)
+                    database.playerStatsDao().addExperience(challenge.rewardExperience)
+                }
+            }
+        }
+    }
+
+    private suspend fun updateEvolveChallengeProgress() {
+        val activeChallenges = database.dailyChallengeDao().getActiveIncompleteChallengesSync()
+
+        for (challenge in activeChallenges) {
+            if (challenge.challengeType == ChallengeType.EVOLVE) {
+                val newProgress = challenge.currentProgress + 1
+                database.dailyChallengeDao().updateProgress(challenge.id, newProgress)
+
+                if (newProgress >= challenge.targetCount) {
+                    database.dailyChallengeDao().markCompleted(challenge.id)
+                    database.playerStatsDao().addExperience(challenge.rewardExperience)
+                }
+            }
+        }
     }
 
     // Fusion recipe operations

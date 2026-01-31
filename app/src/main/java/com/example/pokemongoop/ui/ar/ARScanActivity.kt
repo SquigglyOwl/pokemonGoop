@@ -4,6 +4,7 @@ import android.Manifest
 import android.animation.AnimatorSet
 import android.animation.ObjectAnimator
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
 import android.graphics.Color
 import android.os.Bundle
 import android.view.View
@@ -41,10 +42,10 @@ class ARScanActivity : AppCompatActivity() {
     private var currentLongitude: Double? = null
     private var isScanning = true
 
-    // Spawn timing
-    private var lastSpawnTime = 0L
-    private val SPAWN_INTERVAL_MS = 4000L  // New goop every 4 seconds
-    private val SPAWN_CHANCE = 0.35f       // 35% chance each interval
+    // Color detection for spawning
+    private var currentDetectedType: GoopType? = null
+    private var colorDetectionStartTime = 0L
+    private val COLOR_HOLD_TIME_MS = 2000L  // Hold on color for 2 seconds to spawn
 
     // Catch attempts
     private var catchAttemptsRemaining = 5
@@ -178,42 +179,105 @@ class ARScanActivity : AppCompatActivity() {
                     it.setSurfaceProvider(binding.cameraPreview.surfaceProvider)
                 }
 
+            // Image analyzer for color detection
+            val imageAnalyzer = ImageAnalysis.Builder()
+                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                .build()
+                .also {
+                    it.setAnalyzer(cameraExecutor, ColorAnalyzer { dominantColor ->
+                        runOnUiThread {
+                            if (isScanning && !binding.arOverlay.hasCreature()) {
+                                processDetectedColor(dominantColor)
+                            }
+                        }
+                    })
+                }
+
             val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
 
             try {
                 cameraProvider.unbindAll()
-                cameraProvider.bindToLifecycle(this, cameraSelector, preview)
+                cameraProvider.bindToLifecycle(this, cameraSelector, preview, imageAnalyzer)
             } catch (e: Exception) {
                 Toast.makeText(this, "Failed to start camera", Toast.LENGTH_SHORT).show()
             }
 
         }, ContextCompat.getMainExecutor(this))
-
-        // Start spawn loop
-        startSpawnLoop()
     }
 
-    private fun startSpawnLoop() {
-        lifecycleScope.launch {
-            while (isScanning) {
-                delay(1000) // Check every second
+    private fun processDetectedColor(color: Int) {
+        // Determine goop type from color
+        val detectedType = getGoopTypeFromColor(color)
 
-                val currentTime = System.currentTimeMillis()
-                if (!binding.arOverlay.hasCreature() &&
-                    currentTime - lastSpawnTime >= SPAWN_INTERVAL_MS) {
+        if (detectedType != null) {
+            if (detectedType == currentDetectedType) {
+                // Same color - check progress
+                val elapsed = System.currentTimeMillis() - colorDetectionStartTime
+                val progress = (elapsed.toFloat() / COLOR_HOLD_TIME_MS * 100).toInt().coerceIn(0, 100)
 
-                    if (Random.nextFloat() < SPAWN_CHANCE) {
-                        spawnRandomCreature()
-                        lastSpawnTime = currentTime
-                    }
+                binding.scanStatusText.text = "Detecting ${detectedType.displayName}... $progress%"
+                binding.scanStatusText.setTextColor(detectedType.primaryColor)
+
+                if (elapsed >= COLOR_HOLD_TIME_MS) {
+                    // Spawn this type!
+                    spawnCreatureOfType(detectedType)
+                    resetColorDetection()
                 }
+            } else {
+                // New color - start tracking
+                currentDetectedType = detectedType
+                colorDetectionStartTime = System.currentTimeMillis()
+                binding.scanStatusText.text = "Detecting ${detectedType.displayName}... 0%"
+                binding.scanStatusText.setTextColor(detectedType.primaryColor)
+            }
+        } else {
+            // No valid color detected
+            if (currentDetectedType != null) {
+                resetColorDetection()
             }
         }
     }
 
-    private fun spawnRandomCreature() {
+    private fun getGoopTypeFromColor(color: Int): GoopType? {
+        val r = Color.red(color)
+        val g = Color.green(color)
+        val b = Color.blue(color)
+
+        // Need minimum saturation to detect a color
+        val max = maxOf(r, g, b)
+        val min = minOf(r, g, b)
+        if (max - min < 30) return null  // Too gray/neutral
+
+        return when {
+            // Blue - Water
+            b > r && b > g && b > 80 -> GoopType.WATER
+
+            // Red - Fire
+            r > g && r > b && r > 80 -> GoopType.FIRE
+
+            // Green - Nature
+            g > r && g > b && g > 80 -> GoopType.NATURE
+
+            // Yellow (red + green) - Electric
+            r > 120 && g > 120 && b < 100 -> GoopType.ELECTRIC
+
+            // Dark - Shadow
+            r < 50 && g < 50 && b < 50 -> GoopType.SHADOW
+
+            else -> null
+        }
+    }
+
+    private fun resetColorDetection() {
+        currentDetectedType = null
+        colorDetectionStartTime = 0L
+        binding.scanStatusText.text = "Point camera at colors to find Goops!"
+        binding.scanStatusText.setTextColor(Color.WHITE)
+    }
+
+    private fun spawnCreatureOfType(type: GoopType) {
         lifecycleScope.launch {
-            val creature = repository.getRandomCreature()
+            val creature = repository.getBaseCreatureByType(type)
             creature?.let {
                 withContext(Dispatchers.Main) {
                     showCreature(it)
@@ -320,10 +384,8 @@ class ARScanActivity : AppCompatActivity() {
         binding.arOverlay.hideCreature()
         binding.creatureInfoCard.visibility = View.GONE
         binding.scanningIndicator.visibility = View.VISIBLE
-        binding.scanStatusText.text = "Scanning for Goops..."
-        binding.scanStatusText.setTextColor(Color.WHITE)
         catchAttemptsRemaining = MAX_CATCH_ATTEMPTS
-        lastSpawnTime = System.currentTimeMillis()
+        resetColorDetection()
     }
 
     private fun playMissAnimation() {
@@ -396,5 +458,64 @@ class ARScanActivity : AppCompatActivity() {
         super.onDestroy()
         isScanning = false
         cameraExecutor.shutdown()
+    }
+
+    // Analyzes camera frames to detect dominant color
+    private class ColorAnalyzer(private val onColorDetected: (Int) -> Unit) : ImageAnalysis.Analyzer {
+        private var lastAnalysisTime = 0L
+
+        override fun analyze(image: ImageProxy) {
+            val currentTime = System.currentTimeMillis()
+            // Analyze every 200ms
+            if (currentTime - lastAnalysisTime < 200) {
+                image.close()
+                return
+            }
+            lastAnalysisTime = currentTime
+
+            val bitmap = image.toBitmap()
+            val dominantColor = getDominantColor(bitmap)
+            onColorDetected(dominantColor)
+
+            image.close()
+        }
+
+        private fun getDominantColor(bitmap: Bitmap): Int {
+            // Sample the center region of the image
+            val centerX = bitmap.width / 2
+            val centerY = bitmap.height / 2
+            val sampleSize = minOf(bitmap.width, bitmap.height) / 4
+
+            var rSum = 0L
+            var gSum = 0L
+            var bSum = 0L
+            var count = 0
+
+            val startX = (centerX - sampleSize).coerceAtLeast(0)
+            val endX = (centerX + sampleSize).coerceAtMost(bitmap.width)
+            val startY = (centerY - sampleSize).coerceAtLeast(0)
+            val endY = (centerY + sampleSize).coerceAtMost(bitmap.height)
+
+            // Sample every 4th pixel for performance
+            for (x in startX until endX step 4) {
+                for (y in startY until endY step 4) {
+                    val pixel = bitmap.getPixel(x, y)
+                    rSum += Color.red(pixel)
+                    gSum += Color.green(pixel)
+                    bSum += Color.blue(pixel)
+                    count++
+                }
+            }
+
+            return if (count > 0) {
+                Color.rgb(
+                    (rSum / count).toInt(),
+                    (gSum / count).toInt(),
+                    (bSum / count).toInt()
+                )
+            } else {
+                Color.GRAY
+            }
+        }
     }
 }
