@@ -43,6 +43,12 @@ class ARScanActivity : AppCompatActivity() {
     private var currentLongitude: Double? = null
     private var isScanning = true
 
+    // Color tracking for sustained scanning
+    private var currentDetectedType: GoopType? = null
+    private var colorDetectionStartTime: Long = 0L
+    private val SPAWN_THRESHOLD_MS = 2500L // Must scan color for 2.5 seconds to spawn
+    private var spawnProgress = 0f // 0.0 to 1.0 for UI feedback
+
     private val repository by lazy {
         (application as GoopApplication).repository
     }
@@ -178,7 +184,7 @@ class ARScanActivity : AppCompatActivity() {
                     it.setAnalyzer(cameraExecutor, ColorAnalyzer { dominantColor ->
                         runOnUiThread {
                             if (isScanning && !binding.arOverlay.hasCreature()) {
-                                trySpawnCreature(dominantColor)
+                                trackColorForSpawn(dominantColor)
                             }
                         }
                     })
@@ -197,44 +203,71 @@ class ARScanActivity : AppCompatActivity() {
 
         }, ContextCompat.getMainExecutor(this))
 
-        // Start scanning timer
-        startScanningLoop()
     }
 
-    private fun startScanningLoop() {
-        lifecycleScope.launch {
-            while (isScanning) {
-                delay(3000) // Check every 3 seconds
-                if (!binding.arOverlay.hasCreature() && Random.nextFloat() < 0.3f) {
-                    // 30% chance to spawn a creature
-                    spawnRandomCreature()
-                }
-            }
-        }
-    }
-
-    private fun trySpawnCreature(dominantColor: Int) {
+    private fun trackColorForSpawn(dominantColor: Int) {
         if (binding.arOverlay.hasCreature()) return
 
         // Determine creature type based on dominant color
-        val type = when {
+        val detectedType = when {
             isBlueish(dominantColor) -> GoopType.WATER
             isReddish(dominantColor) -> GoopType.FIRE
             isGreenish(dominantColor) -> GoopType.NATURE
             isYellowish(dominantColor) -> GoopType.ELECTRIC
-            else -> GoopType.SHADOW
+            isDarkish(dominantColor) -> GoopType.SHADOW
+            else -> null
         }
 
-        // Spawn with some randomness
-        if (Random.nextFloat() < 0.1f) { // 10% chance when color matches
-            spawnCreatureOfType(type)
+        val currentTime = System.currentTimeMillis()
+
+        if (detectedType != null) {
+            if (detectedType == currentDetectedType) {
+                // Same color - check if we've scanned long enough
+                val elapsedTime = currentTime - colorDetectionStartTime
+                spawnProgress = (elapsedTime.toFloat() / SPAWN_THRESHOLD_MS).coerceIn(0f, 1f)
+
+                // Update UI to show scanning progress
+                updateScanProgress(detectedType, spawnProgress)
+
+                if (elapsedTime >= SPAWN_THRESHOLD_MS) {
+                    // Spawn the creature!
+                    spawnCreatureOfType(detectedType)
+                    resetColorTracking()
+                }
+            } else {
+                // Different color detected - reset tracking
+                currentDetectedType = detectedType
+                colorDetectionStartTime = currentTime
+                spawnProgress = 0f
+                updateScanProgress(detectedType, 0f)
+            }
+        } else {
+            // No valid color - reset
+            if (currentDetectedType != null) {
+                resetColorTracking()
+                binding.scanStatusText.text = "Scanning..."
+            }
         }
     }
 
-    private fun spawnRandomCreature() {
-        val types = GoopType.getBasicTypes()
-        val type = types[Random.nextInt(types.size)]
-        spawnCreatureOfType(type)
+    private fun resetColorTracking() {
+        currentDetectedType = null
+        colorDetectionStartTime = 0L
+        spawnProgress = 0f
+    }
+
+    private fun updateScanProgress(type: GoopType, progress: Float) {
+        val percentage = (progress * 100).toInt()
+        binding.scanStatusText.text = "Detecting ${type.displayName}... $percentage%"
+        binding.scanStatusText.setTextColor(type.primaryColor)
+    }
+
+    private fun isDarkish(color: Int): Boolean {
+        val r = Color.red(color)
+        val g = Color.green(color)
+        val b = Color.blue(color)
+        // Dark colors with low brightness
+        return r < 60 && g < 60 && b < 60
     }
 
     private fun spawnCreatureOfType(type: GoopType) {
