@@ -49,6 +49,10 @@ class ARScanActivity : AppCompatActivity() {
     private val SPAWN_THRESHOLD_MS = 2500L // Must scan color for 2.5 seconds to spawn
     private var spawnProgress = 0f // 0.0 to 1.0 for UI feedback
 
+    // Escape timer - creature flees if not caught in time
+    private var escapeJob: kotlinx.coroutines.Job? = null
+    private val ESCAPE_TIME_MS = 6000L // 6 seconds to catch before escape
+
     private val repository by lazy {
         (application as GoopApplication).repository
     }
@@ -305,6 +309,51 @@ class ARScanActivity : AppCompatActivity() {
         }
         binding.scanStatusText.text = "Tap to catch! ($catchRate% chance)"
         binding.scanStatusText.setTextColor(creature.type.primaryColor)
+
+        // Start escape timer
+        startEscapeTimer(creature)
+    }
+
+    private fun startEscapeTimer(creature: Creature) {
+        escapeJob?.cancel()
+        escapeJob = lifecycleScope.launch {
+            // Countdown updates
+            for (secondsLeft in (ESCAPE_TIME_MS / 1000).toInt() downTo 1) {
+                delay(1000)
+                if (binding.arOverlay.hasCreature()) {
+                    val catchRate = when (creature.rarity) {
+                        1 -> 90
+                        2 -> 75
+                        3 -> 55
+                        4 -> 35
+                        5 -> 20
+                        else -> 70
+                    }
+                    withContext(Dispatchers.Main) {
+                        binding.scanStatusText.text = "Tap to catch! ($catchRate%) - ${secondsLeft}s"
+                    }
+                }
+            }
+
+            // Time's up - creature escapes
+            if (binding.arOverlay.hasCreature()) {
+                withContext(Dispatchers.Main) {
+                    playEscapeAnimation {
+                        Toast.makeText(
+                            this@ARScanActivity,
+                            "${creature.name} fled!",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                        resetAfterCatch()
+                    }
+                }
+            }
+        }
+    }
+
+    private fun cancelEscapeTimer() {
+        escapeJob?.cancel()
+        escapeJob = null
     }
 
     private fun getRarityText(rarity: Int): String {
@@ -319,6 +368,8 @@ class ARScanActivity : AppCompatActivity() {
     }
 
     private fun handleCatchAttempt(creature: Creature, success: Boolean) {
+        cancelEscapeTimer()
+
         if (success) {
             // Successful catch!
             playCaptureAnimation {
@@ -440,6 +491,7 @@ class ARScanActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         isScanning = false
+        cancelEscapeTimer()
         cameraExecutor.shutdown()
     }
 
