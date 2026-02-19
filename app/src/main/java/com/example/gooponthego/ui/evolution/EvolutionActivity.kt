@@ -3,6 +3,7 @@ package com.example.gooponthego.ui.evolution
 import android.animation.AnimatorSet
 import android.animation.ObjectAnimator
 import android.graphics.drawable.GradientDrawable
+import androidx.core.content.ContextCompat
 import android.os.Bundle
 import android.view.View
 import android.widget.Toast
@@ -73,15 +74,21 @@ class EvolutionActivity : AppCompatActivity() {
     private fun observeData() {
         lifecycleScope.launch {
             repository.getAllPlayerCreaturesWithDetails().collectLatest { creatures ->
-                // Filter to only show creatures that can evolve
-                val evolvable = creatures.filter { details ->
-                    details.creature.evolvesToId != null &&
-                            details.playerCreature.experience >= details.creature.experienceToEvolve
-                }
+                // Filter to only show one representative per creature type that has 3+ copies and can evolve
+                val evolvable = creatures
+                    .filter { details -> details.creature.evolvesToId != null }
+                    .groupBy { it.creature.id }
+                    .filter { (_, group) -> group.size >= 3 }
+                    .map { (_, group) -> group.first() }
+
                 creatureAdapter.submitList(evolvable)
 
-                if (evolvable.isEmpty()) {
-                    binding.instructionText.text = "No creatures ready to evolve.\nCatch more and gain experience!"
+                withContext(Dispatchers.Main) {
+                    binding.instructionText.text = if (evolvable.isEmpty()) {
+                        "No creatures ready to evolve.\nCollect 3 of the same Goop to evolve!"
+                    } else {
+                        "Select a Goop to evolve!"
+                    }
                 }
             }
         }
@@ -108,21 +115,28 @@ class EvolutionActivity : AppCompatActivity() {
 
         // Current creature
         binding.currentCreatureName.text = current.playerCreature.nickname ?: current.creature.name
-        val currentDrawable = binding.currentCreatureVisual.background as? GradientDrawable
-            ?: GradientDrawable().also {
-                it.shape = GradientDrawable.OVAL
-                binding.currentCreatureVisual.background = it
-            }
-        currentDrawable.setColor(current.creature.type.primaryColor)
+        setCreatureImage(binding.currentCreatureVisual, current.creature.imageResName, current.creature.type.primaryColor)
 
         // Evolution result
         binding.evolvedCreatureName.text = evolution.name
-        val evolvedDrawable = binding.evolvedCreatureVisual.background as? GradientDrawable
-            ?: GradientDrawable().also {
-                it.shape = GradientDrawable.OVAL
-                binding.evolvedCreatureVisual.background = it
+        setCreatureImage(binding.evolvedCreatureVisual, evolution.imageResName, evolution.type.primaryColor)
+    }
+
+    private fun setCreatureImage(view: android.widget.ImageView, imageResName: String?, fallbackColor: Int) {
+        val resId = if (imageResName != null) {
+            resources.getIdentifier(imageResName, "drawable", packageName)
+        } else 0
+
+        if (resId != 0) {
+            view.setImageDrawable(ContextCompat.getDrawable(this, resId))
+            view.background = null
+        } else {
+            view.setImageDrawable(null)
+            view.background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(fallbackColor)
             }
-        evolvedDrawable.setColor(evolution.type.primaryColor)
+        }
     }
 
     private fun performEvolution() {
