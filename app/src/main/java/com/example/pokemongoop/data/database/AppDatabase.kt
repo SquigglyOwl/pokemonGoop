@@ -123,7 +123,7 @@ abstract class AppDatabase : RoomDatabase() {
             creatures.add(Creature(id++, "Steam Goop", GoopType.STEAM, 2, 60, 28, 28, 2, null, null, 0, "A misty fusion of water and fire.", "steam_goop"))
             creatures.add(Creature(id++, "Lightning Bloom", GoopType.LIGHTNING_PLANT, 2, 58, 32, 25, 2, null, null, 0, "A shocking plant hybrid crackling with energy.", "lightning_bloom_goop"))
             creatures.add(Creature(id++, "Magma Goop", GoopType.MAGMA, 2, 65, 40, 35, 2, null, null, 0, "A molten fusion of fire and earth.", "magma_goop"))
-            creatures.add(Creature(id++, "Frost Goop", GoopType.ICE, 2, 55, 25, 32, 2, null, null, 0, "A frozen spirit of water and lightning.", "frost_goop"))
+            creatures.add(Creature(id, "Frost Goop", GoopType.ICE, 2, 55, 25, 32, 2, null, null, 0, "A frozen spirit of water and lightning.", "frost_goop"))
 
             return creatures
         }
