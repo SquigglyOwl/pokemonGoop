@@ -42,4 +42,7 @@ interface CreatureDao {
 
     @Query("SELECT * FROM creatures ORDER BY RANDOM() LIMIT 1")
     suspend fun getRandomCreature(): Creature?
+
+    @Query("UPDATE creatures SET isDiscovered = 1 WHERE id = :id")
+    suspend fun markDiscovered(id: Long)
 }
