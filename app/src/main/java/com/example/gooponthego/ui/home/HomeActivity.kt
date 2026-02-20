@@ -92,7 +92,6 @@ class HomeActivity : AppCompatActivity() {
             }
         }
 
-
         // Observe daily challenges
         lifecycleScope.launch {
             repository.getActiveChallenges().collectLatest { challenges ->
