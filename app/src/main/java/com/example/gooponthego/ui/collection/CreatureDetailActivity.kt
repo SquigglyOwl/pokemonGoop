@@ -14,10 +14,13 @@ import androidx.lifecycle.lifecycleScope
 import com.example.gooponthego.GoopApplication
 import com.example.gooponthego.R
 import com.example.gooponthego.data.database.dao.PlayerCreatureWithDetails
+import com.example.gooponthego.data.database.entities.PlayerCreature
 import com.example.gooponthego.databinding.ActivityCreatureDetailBinding
+import com.example.gooponthego.models.GoopType
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.math.abs
 
 class CreatureDetailActivity : AppCompatActivity() {
 
@@ -154,6 +157,37 @@ class CreatureDetailActivity : AppCompatActivity() {
 
         // Set favorite button
         updateFavoriteButton(playerCreature.isFavorite)
+
+        // Set caught location
+        displayCaughtLocation(playerCreature)
+    }
+
+    private fun displayCaughtLocation(playerCreature: PlayerCreature) {
+        val latitude = playerCreature.caughtLatitude
+        val longitude = playerCreature.caughtLongitude
+
+        val locationText = if (latitude != null && longitude != null) {
+            val habitat = determineHabitat(latitude, longitude)
+            "Caught in ${habitat.displayName} Zone\n(${"%.4f".format(latitude)}, ${"%.4f".format(longitude)})"
+        } else {
+            "Unknown Location"
+        }
+
+        binding.caughtLocationText.text = locationText
+    }
+
+    private fun determineHabitat(lat: Double, lng: Double): GoopType {
+        val latZone = (lat * 100).toInt()
+        val lngZone = (lng * 100).toInt()
+        val hash = abs(latZone + lngZone)
+
+        return when (hash % 10) {
+            0, 1 -> GoopType.WATER
+            2, 3 -> GoopType.NATURE
+            4, 5 -> GoopType.ELECTRIC
+            6, 7 -> GoopType.FIRE
+            else -> GoopType.SHADOW
+        }
     }
 
     private fun updateFavoriteButton(isFavorite: Boolean) {
@@ -206,14 +240,26 @@ class CreatureDetailActivity : AppCompatActivity() {
         val details = creatureDetails ?: return
         val name = details.playerCreature.nickname ?: details.creature.name
 
-        AlertDialog.Builder(this)
+        val dialog = AlertDialog.Builder(this)
             .setTitle("Release $name?")
             .setMessage("Are you sure you want to release this creature? This cannot be undone.")
-            .setPositiveButton("Release") { _, _ ->
+            .setPositiveButton("Release in 3...") { _, _ ->
                 releaseCreature()
             }
             .setNegativeButton("Cancel", null)
             .show()
+
+        val releaseButton = dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+        releaseButton.isEnabled = false
+
+        lifecycleScope.launch {
+            for (seconds in 3 downTo 1) {
+                releaseButton.text = "Release in $seconds..."
+                kotlinx.coroutines.delay(1000)
+            }
+            releaseButton.text = "Release"
+            releaseButton.isEnabled = true
+        }
     }
 
     private fun releaseCreature() {
