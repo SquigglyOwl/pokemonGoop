@@ -18,8 +18,10 @@ import com.example.gooponthego.databinding.ActivityCollectionBinding
 import com.example.gooponthego.models.GoopType
 import com.example.gooponthego.ui.evolution.EvolutionActivity
 import com.example.gooponthego.ui.evolution.FusionActivity
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 enum class SortOption(val displayName: String) {
     NAME("Name"),
@@ -139,6 +141,22 @@ class CollectionActivity : AppCompatActivity() {
         }
 
         // Bottom buttons
+        binding.releaseAllDuplicatesButton.setOnClickListener {
+            binding.releaseAllDuplicatesButton.isEnabled = false
+            lifecycleScope.launch {
+                val released = repository.releaseAllDuplicates()
+                withContext(Dispatchers.Main) {
+                    binding.releaseAllDuplicatesButton.isEnabled = true
+                    val message = if (released > 0) {
+                        "Released $released duplicate creature${if (released != 1) "s" else ""}!"
+                    } else {
+                        "No duplicates to release (max 3 per species kept)"
+                    }
+                    Toast.makeText(this@CollectionActivity, message, Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+
         binding.evolutionButton.setOnClickListener {
             startActivity(Intent(this, EvolutionActivity::class.java))
         }
